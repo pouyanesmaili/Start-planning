@@ -1,6 +1,11 @@
 /* Life OS — Vanilla ES6. IndexedDB-first storage with safe local fallback. */
 (() => {
 'use strict';
+// Supabase public project configuration. The publishable key is intended for browser use;
+// row-level security on both tables is required and is already configured for auth.uid().
+const SUPABASE_URL='https://nzwxlnidemfhvdutyuyu.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY='sb_publishable_naBfzGTBDRbcbk2xMMfREQ_IbtRCOFw';
+let cloudClient=null, cloudUser=null, cloudBusy=false;
 const DB_NAME='life-os-db', DB_VERSION=1, STORE='records';
 let db=null, records=[], chartRefs={}, currentMonth=new Date(), timer=null, timerSeconds=1500, timerRunning=false, timerIsBreak=false, deferredInstall=null;
 const $=id=>document.getElementById(id), localDateKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`, today=()=>localDateKey(new Date());
@@ -772,7 +777,60 @@ Object.assign(translations,{
  'هنوز در محدوده بودجه روزانه هستی.':'You are still within your daily limit.','هنوز سقف خرجی تعیین نکرده‌ای.':'You have not set a spending limit yet.',
  'خریداری شده':'purchased','روز متوالی':'day streak','صفحه فعلی':'Current page','تا سطح بعدی:':'To next level:'
 });
-async function init(){await load();startLanguageObserver();clock();setInterval(clock,1000);setupOnboarding();bindAll();setupCalendar();setupTimer();setupSearch();setupSettings();setupBackup();setupPWA();setupEventReminders();if(localStorage.getItem('life-lang'))setLanguage(localStorage.getItem('life-lang'));renderAll();document.querySelectorAll('form [name=date]').forEach(i=>{if(!i.value)i.value=today()})}
+function cloudMessage(message){const el=$('cloudStatus');if(el)el.textContent=message}
+function cloudSettings(){return {theme:localStorage.getItem('life-theme'),lang:localStorage.getItem('life-lang'),currency:localStorage.getItem('life-currency'),accent:localStorage.getItem('life-accent'),waterTarget:localStorage.getItem('life-water-target'),accounts:localStorage.getItem('life-accounts'),mainAccount:localStorage.getItem('life-main-account'),accountSettings:localStorage.getItem('life-account-settings')}}
+function applyCloudSettings(s){if(!s)return;const map={'life-theme':s.theme,'life-lang':s.lang,'life-currency':s.currency,'life-accent':s.accent,'life-water-target':s.waterTarget,'life-accounts':s.accounts,'life-main-account':s.mainAccount,'life-account-settings':s.accountSettings};Object.entries(map).forEach(([k,v])=>{if(v!==null&&v!==undefined)localStorage.setItem(k,v)});setupSettings();if(s.lang)setLanguage(s.lang);renderAll()}
+function cloudUi(){const form=$('cloudAuthForm'),actions=$('cloudActions');if(!form||!actions)return;form.hidden=!!cloudUser;actions.hidden=!cloudUser;$('cloudEmail').disabled=!!cloudUser;$('cloudPassword').disabled=!!cloudUser;if(cloudUser)cloudMessage('وارد شده‌ای: '+cloudUser.email+' · اطلاعات هنوز فقط با فشردن دکمه همگام‌سازی منتقل می‌شوند.');else cloudMessage('برای ذخیره‌سازی ابری، وارد حساب شو یا حساب جدید بساز. اطلاعات محلی تغییر نمی‌کنند.')}
+async function cloudSyncNow(){if(!cloudClient||!cloudUser||cloudBusy)return;cloudBusy=true;$('cloudSync').disabled=true;cloudMessage('در حال بررسی و همگام‌سازی اطلاعات…');try{
+ const uid=cloudUser.id;
+ const {data:remoteRows,error:readError}=await cloudClient.from('user_records').select('record_id,record_type,data,updated_at').eq('user_id',uid);if(readError)throw readError;
+ const localById=new Map(records.map(r=>[String(r.id),r]));
+ for(const row of (remoteRows||[])){const remote={...(row.data||{}),id:String(row.record_id),type:row.record_type,updatedAt:row.updated_at||row.data?.updatedAt||row.data?.createdAt||''};const local=localById.get(remote.id);if(!local)localById.set(remote.id,remote);else{const lt=Date.parse(local.updatedAt||local.createdAt||0)||0,rt=Date.parse(remote.updatedAt||remote.createdAt||0)||0;if(rt>lt)localById.set(remote.id,remote)}}
+ records=Array.from(localById.values());await persist();
+ if(records.length){const payload=records.map(r=>({user_id:uid,record_id:String(r.id),record_type:String(r.type||'record'),data:r,updated_at:r.updatedAt||r.createdAt||new Date().toISOString()}));const {error}=await cloudClient.from('user_records').upsert(payload,{onConflict:'user_id,record_id'});if(error)throw error}
+ const {data:settingsRow,error:settingsReadError}=await cloudClient.from('user_settings').select('settings').eq('user_id',uid).maybeSingle();if(settingsReadError)throw settingsReadError;
+ const localSettings=cloudSettings();if(!settingsRow){const {error}=await cloudClient.from('user_settings').upsert({user_id:uid,settings:localSettings,updated_at:new Date().toISOString()},{onConflict:'user_id'});if(error)throw error}else{applyCloudSettings(settingsRow.settings);const {error}=await cloudClient.from('user_settings').upsert({user_id:uid,settings:cloudSettings(),updated_at:new Date().toISOString()},{onConflict:'user_id'});if(error)throw error}
+ renderAll();cloudMessage('همگام‌سازی انجام شد. '+records.length+' رکورد روی این دستگاه موجود است.');
+ }catch(error){console.error('Cloud sync failed',error);cloudMessage('همگام‌سازی انجام نشد: '+(error.message||'خطای ارتباط یا دسترسی جداول'))}finally{cloudBusy=false;$('cloudSync').disabled=false}}
+function setupCloud(){
+ if(!window.supabase?.createClient){cloudMessage('کتابخانه اتصال ابری بارگذاری نشد. اینترنت و بارگذاری صفحه را بررسی کن.');return}
+ try{
+  cloudClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{autoRefreshToken:true,persistSession:true,detectSessionInUrl:true,flowType:'implicit'}});
+ }catch(error){console.error('Supabase client initialization failed',error);cloudMessage('راه‌اندازی اتصال ابری ناموفق بود: '+(error.message||'خطای ناشناخته'));return}
+ const email=()=>$('cloudEmail').value.trim(),password=()=>$('cloudPassword').value;
+ const signIn=$('cloudSignIn'),signUp=$('cloudSignUp'),signOut=$('cloudSignOut');
+ let authBusy=false;
+ const setAuthBusy=busy=>{authBusy=busy;signIn.disabled=busy;signUp.disabled=busy;signIn.textContent=busy?'لطفاً صبر کن…':'ورود';signUp.textContent=busy?'لطفاً صبر کن…':'ایجاد حساب'};
+ signIn.onclick=async()=>{
+  if(authBusy||!$('cloudAuthForm').reportValidity())return;
+  setAuthBusy(true);cloudMessage('در حال ورود…');
+  try{const {data,error}=await cloudClient.auth.signInWithPassword({email:email(),password:password()});if(error)throw error;cloudUser=data.user||data.session?.user||null;cloudUi()}
+  catch(error){console.error('Supabase sign-in failed',error);cloudMessage('ورود انجام نشد: '+(error.message||'خطای ارتباط با سرویس احراز هویت'))}
+  finally{setAuthBusy(false)}
+ };
+ signUp.onclick=async()=>{
+  if(authBusy||!$('cloudAuthForm').reportValidity())return;
+  setAuthBusy(true);cloudMessage('در حال ساخت حساب…');
+  try{
+   const {data,error}=await cloudClient.auth.signUp({email:email(),password:password(),options:{emailRedirectTo:'https://pouyanesmaili.github.io/Start-planning/'}});
+   if(error)throw error;
+   if(data.session){cloudUser=data.user||data.session.user;cloudUi()}
+   else cloudMessage('درخواست ثبت‌نام ثبت شد. ایمیل تأیید را باز کن؛ پس از تأیید، برنامه باید حساب را تشخیص دهد. اگر حساب وارد نشد، از همین صفحه با همان ایمیل و رمز وارد شو.')
+  }catch(error){console.error('Supabase sign-up failed',error);cloudMessage('ثبت‌نام انجام نشد: '+(error.message||'خطای ارتباط با سرویس احراز هویت'))}
+  finally{setAuthBusy(false)}
+ };
+ $('cloudSync').onclick=cloudSyncNow;
+ signOut.onclick=async()=>{if(authBusy)return;signOut.disabled=true;cloudMessage('در حال خروج…');try{const {error}=await cloudClient.auth.signOut();if(error)throw error;cloudUser=null;cloudUi()}catch(error){console.error('Supabase sign-out failed',error);cloudMessage('خروج انجام نشد: '+(error.message||'خطای ناشناخته'))}finally{signOut.disabled=false}};
+ // Supabase emits INITIAL_SESSION after it restores storage or processes an email-confirmation redirect.
+ cloudClient.auth.onAuthStateChange((event,session)=>{
+  if(['INITIAL_SESSION','SIGNED_IN','SIGNED_OUT','TOKEN_REFRESHED','USER_UPDATED'].includes(event)){
+   cloudUser=session?.user||null;cloudUi();
+   if(event==='SIGNED_IN')cloudMessage('ورود موفق بود: '+(cloudUser?.email||'حساب کاربری')+'. برای انتقال داده‌ها، همگام‌سازی را دستی اجرا کن.');
+  }
+ });
+ cloudUi();
+}
+async function init(){await load();startLanguageObserver();clock();setInterval(clock,1000);setupOnboarding();bindAll();setupCalendar();setupTimer();setupSearch();setupSettings();setupBackup();setupCloud();setupPWA();setupEventReminders();if(localStorage.getItem('life-lang'))setLanguage(localStorage.getItem('life-lang'));renderAll();document.querySelectorAll('form [name=date]').forEach(i=>{if(!i.value)i.value=today()})}
 document.addEventListener('DOMContentLoaded',init);
 })();
 
