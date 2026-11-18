@@ -1,0 +1,19 @@
+{
+  "name": "start-planning",
+  "version": "23.1.0",
+  "private": true,
+  "description": "Start Planning PWA and Android wrapper",
+  "scripts": {
+    "copy:web": "node copy-web.js",
+    "cap:sync": "npm run copy:web && cap sync",
+    "android:add": "cap add android",
+    "android:open": "cap open android",
+    "android:build": "npm run cap:sync && cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0"
+  }
+}
