@@ -498,3 +498,64 @@ html[dir="rtl"] .nav-group-panel{direction:rtl}
 
 /* v23.3 cloud account panel */
 #cloudPanel .form-grid{max-width:560px;margin-top:14px}#cloudPanel input{width:100%;min-width:0}#cloudStatus{line-height:1.8}#cloudActions[hidden]{display:none}
+
+
+/* v24.0 — desktop navigation alignment, settings rhythm, and search usability */
+.bottom-nav{
+  left:50%!important;right:auto!important;transform:translateX(-50%)!important;
+  width:min(780px,calc(100% - 48px))!important;
+  display:grid!important;grid-template-columns:repeat(6,minmax(0,1fr))!important;
+  justify-content:center!important;align-items:stretch!important;gap:8px!important;
+  overflow:visible!important;overflow-x:visible!important;scroll-snap-type:none!important;
+  padding:9px 12px calc(9px + env(safe-area-inset-bottom))!important;
+}
+.bottom-nav-item{
+  flex:initial!important;min-width:0!important;width:100%!important;min-height:62px!important;
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  text-align:center!important;white-space:normal!important;padding:8px 4px!important;
+}
+.bottom-nav-label{white-space:nowrap!important;text-align:center!important}
+html[dir="rtl"] .bottom-nav{direction:rtl!important}
+html[dir="ltr"] .bottom-nav{direction:ltr!important}
+.settings-grid{align-items:start;gap:18px}
+.settings-grid>.panel{display:flex;flex-direction:column;align-items:stretch;gap:10px;min-width:0}
+.settings-grid>.panel>h3{margin:0 0 4px}
+.settings-grid .setting-row{width:100%;min-height:52px;margin:0;gap:14px}
+.settings-grid .setting-row>span{flex:1;min-width:0;line-height:1.5}
+.settings-grid .setting-row select,.settings-grid .setting-row input{flex:0 1 48%;width:48%;max-width:190px;min-height:40px}
+.settings-grid>.panel>button:not(.feature-link),
+.settings-grid>.panel>.button-row button,
+.settings-grid>.panel>.button-row .file-label{
+  min-height:42px;display:flex;align-items:center;justify-content:center;
+  width:100%;margin:0;text-align:center;
+}
+.settings-grid>.panel>.button-row{display:grid;grid-template-columns:1fr;gap:10px;width:100%;margin:4px 0}
+.settings-grid>.panel>#cloudAuthForm{display:grid;grid-template-columns:1fr;gap:10px;width:100%;max-width:none;margin:4px 0}
+#cloudAuthForm .button-row{grid-column:1/-1;display:grid;grid-template-columns:1fr;gap:10px;width:100%;margin:0}
+#cloudActions{display:grid;grid-template-columns:1fr;gap:10px;width:100%;margin:8px 0}
+#cloudActions button{width:100%;min-height:44px}
+#cloudPanel>p{line-height:1.8;margin:4px 0}
+#cloudPanel input{min-height:42px}
+#clearData{margin-top:6px!important}
+.search-results{position:fixed;z-index:2147482000;top:76px;inset-inline-start:18px;width:min(420px,calc(100vw - 36px));max-height:min(65vh,520px);overflow:auto;padding:14px;box-shadow:0 16px 44px #0005}
+.search-result{width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:11px 12px;margin-top:7px;border:1px solid var(--line);border-radius:11px;background:var(--surface2);color:var(--text);text-align:start;cursor:pointer}
+.search-result:hover{border-color:var(--accent)}
+.search-result small{color:var(--muted);font-size:11px}
+html[dir="ltr"] .search-result{text-align:left;align-items:flex-start}
+@media(min-width:761px){
+ .bottom-nav{width:min(780px,calc(100% - 48px))!important;bottom:16px!important}
+ .bottom-nav-item{min-height:58px!important}
+ .settings-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:760px){
+ .bottom-nav{width:calc(100% - 14px)!important;gap:4px!important;padding:7px 7px calc(7px + env(safe-area-inset-bottom))!important}
+ .bottom-nav-item{min-height:56px!important;padding:6px 2px!important}
+ .bottom-nav-label{font-size:9px!important}
+ .settings-grid>.panel>.button-row{grid-template-columns:1fr}
+}
+@media(max-width:420px){
+ .settings-grid .setting-row{align-items:flex-start;flex-direction:column;gap:6px;padding:11px 0}
+ .settings-grid .setting-row select,.settings-grid .setting-row input{width:100%;max-width:none;flex:initial}
+ .settings-grid>.panel>.button-row{grid-template-columns:1fr}
+ #cloudAuthForm .button-row{grid-template-columns:1fr}
+}

@@ -10,7 +10,7 @@ const DB_NAME='life-os-db', DB_VERSION=1, STORE='records';
 let db=null, records=[], chartRefs={}, currentMonth=new Date(), timer=null, timerSeconds=1500, timerRunning=false, timerIsBreak=false, deferredInstall=null;
 const $=id=>document.getElementById(id), localDateKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`, today=()=>localDateKey(new Date());
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstall=event;const button=document.getElementById('installBtn');if(button)button.hidden=false});
-window.addEventListener('appinstalled',()=>{const status=document.getElementById('pwaStatus'),button=document.getElementById('installBtn');if(status)status.textContent='برنامه با موفقیت نصب شد.';if(button)button.hidden=true});
+window.addEventListener('appinstalled',()=>{const status=document.getElementById('pwaStatus'),button=document.getElementById('installBtn');if(status)status.textContent=uiText('برنامه با موفقیت نصب شد.');if(button)button.hidden=true});
 const configs={
  tasks:{type:'task',title:'title',meta:r=>`${r.date||'بدون تاریخ'} · ${r.start||'—'} تا ${r.end||'—'}${r.start&&r.end?' · '+durationBetween(r.start,r.end):''} · ${priorityLabel(r.priority)}${r.repeat&&r.repeat!=='none'?' · تکرار '+(r.repeat==='daily'?'روزانه':'هفتگی'):''}`},
  events:{type:'event',title:'title',meta:r=>`${r.date} ${r.time||''} · ${r.kind||''}`},
@@ -225,6 +225,23 @@ function bindNewModules(){
 }
 
 function renderAll(){renderDashboard();renderTasks();renderHabits();renderGoals();renderNotes();renderFinance();renderHealth();renderCalendar();renderReports();renderTimes();renderReading();renderGratitude();renderMoodMeals();renderShopping();renderSmartPlan();renderWeekPlan();renderReminders();renderChallenges();renderStudy();renderDailyLimit();renderWishlist();renderMonthly();renderSkills()}
+function renderStudy(){
+ const listEl=$('studyList'),summary=$('studySummary');
+ if(!listEl||!summary)return;
+ const en=(localStorage.getItem('life-lang')||'fa')==='en',L=(fa,eng)=>en?eng:fa;
+ const sessions=list('study').slice().sort((a,b)=>String(b.date||b.createdAt||'').localeCompare(String(a.date||a.createdAt||'')));
+ const total=sessions.reduce((sum,r)=>sum+Math.max(0,Number(r.minutes)||0),0);
+ const upcoming=sessions.filter(r=>r.examDate&&r.examDate>=today()).sort((a,b)=>a.examDate.localeCompare(b.examDate));
+ summary.innerHTML=stat(L('جلسات ثبت‌شده','Sessions logged'),sessions.length,'📚')+
+  stat(L('مجموع زمان مطالعه','Total study time'),`${Math.floor(total/60)} ${L('ساعت','hr')} ${total%60} ${L('دقیقه','min')}`,'◷')+
+  stat(L('امتحان‌های پیش‌رو','Upcoming exams'),upcoming.length,'▣');
+ listEl.innerHTML=sessions.length?sessions.map(r=>{
+  const exam=r.examDate?` · ${L('امتحان','Exam')}: ${esc(r.examDate)}`:'';
+  const note=r.note?` · ${esc(r.note)}`:'';
+  return `<article class="data-card"><div class="data-main"><strong>${esc(r.subject||L('جلسه مطالعه','Study session'))}</strong><small>${esc(r.date||'')} · ${Number(r.minutes)||0} ${L('دقیقه','min')}${exam}${note}</small></div><div class="data-actions"><button class="delete" data-delete="${esc(r.id)}">${L('حذف','Delete')}</button></div></article>`;
+ }).join(''):empty(L('هنوز جلسه‌ای ثبت نکرده‌ای.','No study sessions logged yet.'));
+ listEl.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>remove(b.dataset.delete));
+} 
 function renderTimes(){renderList('timeList','time')}
 let currentPage='dashboard';
 function showPage(page){
@@ -261,7 +278,24 @@ function refreshGroupedNavigation(){const group=pageGroup(currentPage);document.
 
 function setupCalendar(){ $('prevMonth').onclick=()=>{currentMonth.setMonth(currentMonth.getMonth()-1);renderCalendar()};$('nextMonth').onclick=()=>{currentMonth.setMonth(currentMonth.getMonth()+1);renderCalendar()}}
 function setupTimer(){const display=$('timerDisplay');function paint(){display.textContent=`${String(Math.floor(timerSeconds/60)).padStart(2,'0')}:${String(timerSeconds%60).padStart(2,'0')}`}function stop(){clearInterval(timer);timer=null;timerRunning=false}$('timerStart').onclick=()=>{if(timerRunning)return;timerRunning=true;timer=setInterval(()=>{timerSeconds--;paint();if(timerSeconds<=0){stop();timerIsBreak=!timerIsBreak;timerSeconds=(Number($(timerIsBreak?'breakMinutes':'focusMinutes').value)||5)*60;$('timerMode').textContent=timerIsBreak?'زمان استراحت':'زمان تمرکز';toast(timerIsBreak?'جلسه تمرکز تمام شد؛ استراحت کن.':'استراحت تمام شد؛ آماده تمرکز شو.');if(!timerIsBreak)add('time',{activity:'جلسه پومودورو',minutes:Number($('focusMinutes').value)||25,date:today()});paint()}},1000)};$('timerPause').onclick=stop;$('timerReset').onclick=()=>{stop();timerIsBreak=false;timerSeconds=(Number($('focusMinutes').value)||25)*60;paint();$('timerMode').textContent='زمان تمرکز'};$('focusMinutes').onchange=$('timerReset').onclick;paint()}
-function setupSearch(){$('globalSearch').addEventListener('input',e=>{const q=e.target.value.trim().toLowerCase();if(!q)return;const hits=records.filter(r=>JSON.stringify(r).toLowerCase().includes(q)).slice(0,12);if(!hits.length){toast('نتیجه‌ای پیدا نشد');return}const lines=hits.map(r=>`${r.title||r.label||r.category||r.activity||'مورد'} — ${r.type}`).join('\n');if(e.inputType==='insertText'&&e.data===' ')return;const old=$('searchResults');if(old)old.remove();const box=document.createElement('div');box.id='searchResults';box.className='panel';box.style.position='fixed';box.style.zIndex='50';box.style.top='75px';box.style.left='25px';box.style.width='min(380px,90vw)';box.innerHTML=`<div class="panel-head"><strong>نتایج جست‌وجو (${hits.length})</strong><button class="text-btn" id="closeSearch">بستن</button></div>${hits.map(r=>`<div class="compact-item">${esc(r.title||r.label||r.category||r.activity||'مورد')} <small>${esc(r.type)}</small></div>`).join('')}`;document.body.appendChild(box);$('closeSearch').onclick=()=>box.remove()});}
+function setupSearch(){
+ const input=$('globalSearch');if(!input)return;
+ const pageFor={task:'planner',event:'calendar',habit:'habits',goal:'goals',note:'notes',finance:'finance',health:'health',time:'focus',reading:'notes',study:'study',reminder:'reminders',challenge:'challenges',shopping:'shopping',wishlist:'wishlist',skill:'skills',gratitude:'notes',mood:'health',meal:'health'};
+ const close=()=>document.getElementById('searchResults')?.remove();
+ input.addEventListener('input',e=>{
+  const q=e.target.value.trim().toLocaleLowerCase();close();if(!q)return;
+  const hits=records.filter(r=>JSON.stringify(r).toLocaleLowerCase().includes(q)).slice(0,15);
+  const en=(localStorage.getItem('life-lang')||'fa')==='en',L=(fa,eng)=>en?eng:fa;
+  const box=document.createElement('div');box.id='searchResults';box.className='panel search-results';
+  box.innerHTML=`<div class="panel-head"><strong>${L('نتایج جست‌وجو','Search results')} (${hits.length})</strong><button type="button" class="text-btn" id="closeSearch">${L('بستن','Close')}</button></div>`+
+   (hits.length?hits.map((r,i)=>`<button type="button" class="search-result" data-result-index="${i}"><strong>${esc(r.title||r.subject||r.label||r.category||r.activity||L('مورد','Item'))}</strong><small>${esc(r.type||'')} · ${esc(r.date||r.createdAt?.slice(0,10)||'')}</small></button>`).join(''):`<div class="empty">${L('نتیجه‌ای پیدا نشد','No results found')}</div>`);
+  box._hits=hits;document.body.appendChild(box);
+  $('closeSearch').onclick=close;
+  box.querySelectorAll('[data-result-index]').forEach(btn=>btn.addEventListener('click',()=>{const record=hits[Number(btn.dataset.resultIndex)];close();const page=pageFor[record?.type];if(page)showPage(page);else toast(L('بخش این مورد پیدا نشد.','The section for this item was not found.'))}));
+ });
+ input.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
+ document.addEventListener('click',e=>{if(!e.target.closest('#searchResults')&&!e.target.closest('#globalSearch'))close()});
+}
 function setupSettings(){const theme=localStorage.getItem('life-theme')||'dark',lang=localStorage.getItem('life-lang')||'fa',accent=localStorage.getItem('life-accent')||'violet';document.body.classList.toggle('light',theme==='light');setAccent(accent);$('themeSelect').value=theme;$('accentSelect').value=accent;$('languageSelect').value=lang;$('currencySelect').value=localStorage.getItem('life-currency')||'تومان';$('waterTarget').value=localStorage.getItem('life-water-target')||2000;$('themeToggle').onclick=()=>{const t=document.body.classList.contains('light')?'dark':'light';setTheme(t);$('themeSelect').value=t};$('langToggle').onclick=()=>setLanguage(localStorage.getItem('life-lang')==='fa'?'en':'fa');$('languageSelect').onchange=()=>setLanguage($('languageSelect').value);$('saveSettings').onclick=()=>{setTheme($('themeSelect').value);setAccent($('accentSelect').value);setLanguage($('languageSelect').value);localStorage.setItem('life-currency',$('currencySelect').value);localStorage.setItem('life-water-target',$('waterTarget').value);renderAll();toast('تنظیمات ذخیره شد')}}
 function setTheme(t){document.body.classList.toggle('light',t==='light');localStorage.setItem('life-theme',t)}
 function setAccent(a){const allowed=['violet','blue','green','rose','amber','coral','teal'];const value=allowed.includes(a)?a:'violet';document.body.dataset.accent=value;localStorage.setItem('life-accent',value)}
@@ -568,6 +602,40 @@ Object.assign(translations,{
  'افزایش یا کاهش موجودی':'Add or subtract from balance','برای پولی که جدا از درآمد و هزینه روزانه به حسابت اضافه یا از آن کم می‌شود.':'For money added to or taken from your account outside regular income and expenses.',
  'واریز به حساب':'Deposit','برداشت از حساب':'Withdrawal','علت؛ مثلاً پول نقد یا هدیه':'Reason, e.g. cash or a gift','ثبت واریز / برداشت':'Save deposit / withdrawal','موجودی فعلی حساب من':'My current balance','موجودی اولیه':'Opening balance','مجموع درآمد':'Total income','مجموع هزینه‌ها':'Total expenses','واریزهای دستی':'Manual deposits','برداشت‌های دستی':'Manual withdrawals','نام حساب؛ مثلاً کیف پول':'Account name, e.g. wallet','ذخیره اطلاعات حساب':'Save account details','حساب من':'My account','موجودی حساب':'Account balance','افزودن کار':'Add task','عنوان کار':'Task title','اولویت: کم، متوسط، زیاد یا فوری':'Priority: low, medium, high, or urgent','مدت تقریبی (دقیقه)':'Estimated duration (minutes)','زمان تقریبی انجام کار':'Estimated task duration','کار انجام‌شده ثبت شد.':'Task marked as completed.','کار باز و سررسیدشده‌ای نداری. از بخش کارها یک فعالیت اضافه کن.':'No open tasks are due. Add a task in the Tasks section.','از موعد گذشته':'Overdue','اولویت فوری':'Urgent priority','اولویت زیاد':'High priority','پیشنهاد بعدی':'Suggested next step','بدون ساعت':'No time set','انجام شد':'Mark done','ویرایش':'Edit','حذف':'Delete','عنوان را وارد کن':'Enter a title','اولویت معتبر نیست':'Invalid priority','حساب برای این برداشت موجودی کافی ندارد.':'There is not enough balance for this withdrawal.','عنوان عادت':'Habit name','هدف روزانه یا هفتگی':'Daily or weekly target','هدف باید عددی بزرگ‌تر از صفر باشد':'The target must be a number greater than zero.','عنوان هدف':'Goal title','مهلت (YYYY-MM-DD)':'Deadline (YYYY-MM-DD)','− مرحله':'− Step'
 });
+Object.assign(translations,{
+ 'حساب کاربری و همگام‌سازی ابری':'Account and cloud sync',
+ 'برای استفاده از ذخیره‌سازی ابری، با ایمیل خود وارد شو.':'Sign in with your email to use cloud storage.',
+ 'ایمیل':'Email','رمز عبور (حداقل ۸ نویسه)':'Password (at least 8 characters)',
+ 'ورود':'Sign in','ایجاد حساب':'Create account','همگام‌سازی اکنون':'Sync now','خروج از حساب':'Sign out',
+ 'اطلاعات محلی روی این دستگاه باقی می‌مانند. برای انتقال به دستگاه دیگر، پس از ورود از گزینه همگام‌سازی استفاده کن.':'Your local data stays on this device. To transfer data to another device, sign in and use Sync.',
+ 'تم برنامه':'App theme','رنگ اصلی':'Accent color','زبان':'Language','واحد پول':'Currency',
+ 'ذخیره تنظیمات':'Save settings','▶ اجرای دوباره راهنمای برنامه':'▶ Replay app tour',
+ 'پشتیبان‌گیری و بازیابی':'Backup and restore','از تمام داده‌ها یک فایل JSON تهیه کن یا نسخه پشتیبان را بازیابی کن.':'Export all your data as a JSON file or restore a backup.',
+ '↓ دریافت پشتیبان JSON':'↓ Download JSON backup','↑ بازیابی JSON':'↑ Restore JSON','پاک‌کردن همه اطلاعات':'Delete all data',
+ 'نصب و وضعیت برنامه':'App installation and status','بررسی وضعیت نصب...':'Checking installation status...','نصب اپلیکیشن':'Install app',
+ 'نسخه 23.4 · اصلاح ورود ابری · اطلاعات روی همین دستگاه ذخیره می‌شوند.':'Version 24.0 · Cloud account and sync improvements · Data is stored on this device.',
+ 'نصب روی گوشی یا کامپیوتر':'Install on a phone or computer',
+ 'اندروید و کامپیوتر: از منوی مرورگر گزینه Install app یا نصب برنامه را انتخاب کن.':'Android and desktop: open the browser menu and choose Install app.',
+ 'آیفون و آیپد: در Safari دکمه Share را بزن و Add to Home Screen را انتخاب کن.':'iPhone and iPad: in Safari, tap Share, then choose Add to Home Screen.',
+ 'ظاهر و زبان':'Appearance and language','حریم خصوصی':'Privacy','قفل برنامه':'App lock',
+ 'درس و امتحان':'Study and exams','زمان مطالعه‌ات را ثبت کن و تاریخ امتحان‌ها را فراموش نکن.':'Log your study time and keep track of exam dates.',
+ 'جلسات ثبت‌شده':'Sessions logged','مجموع زمان مطالعه':'Total study time','امتحان‌های پیش‌رو':'Upcoming exams',
+ 'هنوز جلسه‌ای ثبت نکرده‌ای.':'No study sessions logged yet.','امتحان':'Exam','جلسه مطالعه':'Study session',
+ 'برای ذخیره‌سازی ابری، وارد حساب شو یا حساب جدید بساز. اطلاعات محلی تغییر نمی‌کنند.':'Sign in or create an account to use cloud storage. Your local data will remain unchanged.',
+ 'در حال بررسی و همگام‌سازی اطلاعات…':'Checking and syncing your data…',
+ 'برنامه روی دستگاه نصب شده است.':'The app is installed on this device.',
+ 'برای نصب، سایت باید با HTTPS باز شود؛ فایل محلی برای نصب کافی نیست.':'The site must be opened over HTTPS to install. A local file is not sufficient.',
+ 'در آیفون: سایت را در Safari باز کن، Share و سپس Add to Home Screen را بزن.':'On iPhone, open the site in Safari, tap Share, then Add to Home Screen.',
+ 'برای نصب مستقل، از منوی Chrome گزینه Install app را انتخاب کن؛ گزینه Create shortcut فقط میان‌بر می‌سازد.':'To install the app, choose Install app from the Chrome menu. Create shortcut only makes a shortcut.',
+ 'اگر دکمه نصب فعال نشد، از منوی Chrome گزینه Install app را انتخاب کن؛ Create shortcut را انتخاب نکن.':'If the install button is unavailable, choose Install app from the Chrome menu, not Create shortcut.',
+ 'ثبت سرویس‌ورکر ناموفق بود. فایل sw.js باید در ریشه سایت منتشر شده باشد.':'Service worker registration failed. Make sure sw.js is published in the site root.',
+ 'در حال ورود…':'Signing in…','در حال ساخت حساب…':'Creating your account…','در حال خروج…':'Signing out…','لطفاً صبر کن…':'Please wait…',
+ 'همگام‌سازی انجام شد. ':'Sync completed. ',' رکورد روی این دستگاه موجود است.':' records are available on this device.',
+ 'همگام‌سازی انجام نشد: ':'Sync failed: ','ورود انجام نشد: ':'Sign-in failed: ','ثبت‌نام انجام نشد: ':'Sign-up failed: ','خروج انجام نشد: ':'Sign-out failed: ',
+ 'ورود موفق بود: ':'Signed in successfully: ','. برای انتقال داده‌ها، همگام‌سازی را دستی اجرا کن.':'. Run sync manually to transfer your data.',
+ 'وارد شده‌ای: ':'Signed in as: ',' · اطلاعات هنوز فقط با فشردن دکمه همگام‌سازی منتقل می‌شوند.':' · Data transfers only when you press Sync.',
+ 'درخواست ثبت‌نام ثبت شد. ایمیل تأیید را باز کن؛ پس از تأیید، برنامه باید حساب را تشخیص دهد. اگر حساب وارد نشد، از همین صفحه با همان ایمیل و رمز وارد شو.':'Your sign-up request was received. Open the confirmation email. After confirming, sign in here with the same email and password.'
+});
 const originalTextNodes=new Map();
 Object.assign(translations,{
  'انرژی امروز':'Daily motivation','هر روز یک قدم به هدفت نزدیک‌تر شو.':'Take one step closer to your goal every day.','موجودی شروع':'Starting balance','نام حساب؛ مثلاً کیف پول':'Account name, e.g. Wallet','حساب‌های من':'My accounts','حساب اصلی':'Main account','مقدار معتبر وارد کن':'Enter a valid value.','حساب‌ها و مبلغ انتقال را بررسی کن':'Check the accounts and transfer amount.','حساب مبدأ':'From account','حساب مقصد':'To account','از حساب':'From account','به حساب':'To account','حساب مورد استفاده':'Account to use','تراکنشی پیدا نشد':'No transactions found.','انتقال پول':'Money transfer','حساب‌های من':'My accounts','برای پول نقد و حساب‌های بانکی، حساب جدا بساز.':'Create separate accounts for cash and bank balances.','افزودن حساب':'Add account','موجودی شروع':'Starting balance','انتقال بین حساب‌ها':'Transfer between accounts','پول را از یک حساب به حساب دیگر جابه‌جا کن.':'Move money from one account to another.','مبلغ انتقال':'Transfer amount','انتقال پول':'Transfer money','جست‌وجوی تراکنش‌ها':'Search transactions','جست‌وجو بر اساس عنوان یا مبلغ...':'Search by title or amount...','مجموع موجودی حساب‌ها':'Total account balance','موجودی فعلی':'Current balance','حساب مبدأ':'From account','حساب مقصد':'To account','از حساب':'From account','به حساب':'To account','حساب مورد استفاده':'Account to use','موجودی حساب کافی نیست':'Insufficient account balance','از سقف خرج روزانه عبور کردی.':'You exceeded your daily spending limit.','نام حساب':'Account name','موجودی اولیه':'Opening balance','مبلغ':'Amount','عنوان':'Title',
@@ -596,7 +664,7 @@ function translatePage(lang){const root=document.body;const walker=document.crea
 Object.assign(translations,{
  'خلاصه عملکرد':'Performance overview','گزارش کامل':'Full report','افزودن فعالیت':'Add activity','ثبت یک نوبت':'Log one session','＋ ثبت یک نوبت':'＋ Log one session','− اصلاح':'− Undo one entry','تعداد دفعات در روز یا هفته':'Times per day or week','هدف روزانه یا هفتگی':'Daily or weekly target','ثبت تراکنش':'Add transaction','هر واریز یا برداشتی را با عنوان و تاریخ ثبت کن.':'Record each deposit or withdrawal with a title and date.','عنوان؛ مثلاً حقوق، خرید یا خوراک':'Title, e.g. salary, shopping, or food','موجودی اولیه را ثبت کن؛ واریزها و برداشت‌های بعدی به‌صورت جداگانه روی آن اعمال می‌شوند.':'Set your opening balance; later deposits and withdrawals are applied separately.','موجودی فعلی = موجودی اولیه + واریزها − برداشت‌ها.':'Current balance = opening balance + deposits − withdrawals.','ذخیره موجودی اولیه':'Save opening balance','تاریخچه تراکنش‌ها':'Transaction history','جدیدترین موارد در ابتدا':'Newest entries first','هنوز تراکنشی ثبت نشده است.':'No transactions have been recorded yet.','ساعت خوابیدن':'Bedtime','ساعت بیدارشدن':'Wake-up time','اگر بعد از نیمه‌شب بیدار می‌شوی، تاریخ همان روزی را انتخاب کن که از خواب بیدار شده‌ای.':'If you wake up after midnight, select the date you woke up.','محاسبه و ثبت خواب':'Calculate and save sleep','کم‌خوابی':'Too little sleep','خواب کافی':'Healthy sleep duration','خواب‌بیش‌ازحد':'Too much sleep','چالش روزانه':'Daily challenge','روز ثبت‌شده':'days logged','از':'of','شروع چالش':'Start challenge','۳ روزه':'3 days','۷ روزه':'7 days','۳۰ روزه':'30 days','مانده خالص این ماه:':'Net balance this month:','درآمد و واریز':'Income and deposits','هزینه و برداشت':'Expenses and withdrawals','نوبت عادت‌ها':'Habit sessions','تراکنش‌های مالی':'Financial transactions','جلسات مطالعه':'Study sessions','زمان فعالیت':'Activity time','موجودی فعلی':'Current balance','کل واریزها':'Total deposits','کل برداشت‌ها':'Total withdrawals','واریز به حساب':'Deposit','برداشت از حساب':'Withdrawal','ثبت خواب':'Log sleep','چالش‌ها':'Challenges','روزانه':'Daily','هفتگی':'Weekly','خاطره':'Memory','ایده':'Idea'
 });
-function setLanguage(lang){const value=lang==='en'?'en':'fa';localStorage.setItem('life-lang',value);translatePage(value);if(typeof renderAll==='function')renderAll();}
+function setLanguage(lang){const value=lang==='en'?'en':'fa';localStorage.setItem('life-lang',value);translatePage(value);if(typeof renderAll==='function')renderAll();if(typeof cloudUi==='function')cloudUi();if(typeof setupPWA==='function')setupPWA();}
 let languageObserver;
 function startLanguageObserver(){if(languageObserver)languageObserver.disconnect();languageObserver=new MutationObserver(changes=>{const lang=localStorage.getItem('life-lang')||'fa';for(const change of changes){for(const node of change.addedNodes){if(node.nodeType===Node.TEXT_NODE)translateTextNode(node,lang);else if(node.nodeType===Node.ELEMENT_NODE){const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let textNode;while((textNode=walker.nextNode()))translateTextNode(textNode,lang);translateAttributes(node,lang)}}}});languageObserver.observe(document.body,{childList:true,subtree:true});}
 function setupBackup(){$('exportBtn').onclick=()=>{const payload={app:'Start Planning',version:1,exportedAt:new Date().toISOString(),records,settings:{theme:localStorage.getItem('life-theme'),lang:localStorage.getItem('life-lang'),currency:localStorage.getItem('life-currency'),accent:localStorage.getItem('life-accent'),waterTarget:localStorage.getItem('life-water-target'),accounts:localStorage.getItem('life-accounts'),mainAccount:localStorage.getItem('life-main-account'),accountSettings:localStorage.getItem('life-account-settings')}};const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`life-os-backup-${today()}.json`;a.click();URL.revokeObjectURL(url);$('backupStatus').textContent='فایل پشتیبان آماده شد.'};$('importFile').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{const data=JSON.parse(await file.text());if(!Array.isArray(data.records))throw Error('invalid');if(!confirm(uiText(`بازیابی ${data.records.length} رکورد؟ داده‌های فعلی جایگزین می‌شوند.`)))return;records=data.records;await persist();const s=data.settings||{};Object.entries({'life-theme':s.theme,'life-lang':s.lang,'life-currency':s.currency,'life-accent':s.accent,'life-water-target':s.waterTarget,'life-accounts':s.accounts,'life-main-account':s.mainAccount,'life-account-settings':s.accountSettings}).forEach(([k,v])=>{if(v!==null&&v!==undefined)localStorage.setItem(k,v)});setupSettings();renderAll();$('backupStatus').textContent='بازیابی با موفقیت انجام شد.'}catch(err){toast('فایل پشتیبان معتبر نیست')}e.target.value=''};$('clearData').onclick=async()=>{if(!confirm(uiText('تمام اطلاعات این برنامه برای همیشه حذف شود؟ ابتدا از اطلاعات پشتیبان بگیر.')))return;records=[];await persist();localStorage.removeItem('life-accounts');localStorage.removeItem('life-main-account');localStorage.removeItem('life-account-settings');renderAll();toast('اطلاعات پاک شد')}}
@@ -606,13 +674,13 @@ function setupPWA(){
  const isLocalhost=['localhost','127.0.0.1','[::1]'].includes(location.hostname);
  const secure=location.protocol==='https:'||isLocalhost;
  const status=$('pwaStatus'),button=$('installBtn');
- if(isStandalone)status.textContent='برنامه روی دستگاه نصب شده است.';
- else if(!secure){status.textContent='برای نصب، سایت باید با HTTPS باز شود؛ فایل محلی برای نصب کافی نیست.';button.hidden=true}
- else if(isIOS){status.textContent='در آیفون: سایت را در Safari باز کن، Share و سپس Add to Home Screen را بزن.';button.hidden=true}
- else status.textContent='برای نصب مستقل، از منوی Chrome گزینه Install app را انتخاب کن؛ گزینه Create shortcut فقط میان‌بر می‌سازد.';
+ if(isStandalone)status.textContent=uiText('برنامه روی دستگاه نصب شده است.');
+ else if(!secure){status.textContent=uiText('برای نصب، سایت باید با HTTPS باز شود؛ فایل محلی برای نصب کافی نیست.');button.hidden=true}
+ else if(isIOS){status.textContent=uiText('در آیفون: سایت را در Safari باز کن، Share و سپس Add to Home Screen را بزن.');button.hidden=true}
+ else status.textContent=uiText('برای نصب مستقل، از منوی Chrome گزینه Install app را انتخاب کن؛ گزینه Create shortcut فقط میان‌بر می‌سازد.');
  if(deferredInstall)button.hidden=false;
- button.onclick=async()=>{if(!deferredInstall){status.textContent='اگر دکمه نصب فعال نشد، از منوی Chrome گزینه Install app را انتخاب کن؛ Create shortcut را انتخاب نکن.';return}deferredInstall.prompt();const choice=await deferredInstall.userChoice;status.textContent=choice?.outcome==='accepted'?'درخواست نصب پذیرفته شد.':'نصب انجام نشد؛ از منوی Chrome گزینه Install app را بررسی کن.';deferredInstall=null;button.hidden=true};
- if('serviceWorker'in navigator&&secure){navigator.serviceWorker.register('./sw.js',{scope:'./'}).then(reg=>reg.update()).catch(err=>{console.error('Service worker registration failed',err);status.textContent='ثبت سرویس‌ورکر ناموفق بود. فایل sw.js باید در ریشه سایت منتشر شده باشد.'})}
+ button.onclick=async()=>{if(!deferredInstall){status.textContent=uiText('اگر دکمه نصب فعال نشد، از منوی Chrome گزینه Install app را انتخاب کن؛ Create shortcut را انتخاب نکن.');return}deferredInstall.prompt();const choice=await deferredInstall.userChoice;status.textContent=uiText(choice?.outcome==='accepted'?'درخواست نصب پذیرفته شد.':'نصب انجام نشد؛ از منوی Chrome گزینه Install app را بررسی کن.');deferredInstall=null;button.hidden=true};
+ if('serviceWorker'in navigator&&secure){navigator.serviceWorker.register('./sw.js',{scope:'./'}).then(reg=>reg.update()).catch(err=>{console.error('Service worker registration failed',err);status.textContent=uiText('ثبت سرویس‌ورکر ناموفق بود. فایل sw.js باید در ریشه سایت منتشر شده باشد.')})}
 }
 function bindFinanceForms(){const savingsForm=$('savingsForm');if(savingsForm)savingsForm.addEventListener('submit',async e=>{e.preventDefault();const d=formData(savingsForm),amount=Number(d.amount);if(!Number.isFinite(amount)||amount<=0){toast('مبلغ پس‌انداز معتبر وارد کن');return}if(accountBalance().balance<amount){toast('موجودی قابل‌خرج برای این پس‌انداز کافی نیست');return}const saved=await add('savings',{title:String(d.title||'پس‌انداز').trim(),amount,date:d.date||today()});if(saved){savingsForm.reset();if(savingsForm.elements.date)savingsForm.elements.date.value=today()}});const form=$('transactionForm');if(!form)return;form.addEventListener('submit',async e=>{e.preventDefault();const d=formData(form),amount=Number(d.amount),direction=d.direction;if(!Number.isFinite(amount)||amount<=0||!['deposit','withdraw'].includes(direction)){toast('نوع تراکنش و مبلغ را بررسی کن');return}if(!String(d.category||'').trim()){toast('عنوان تراکنش را وارد کن');return}if(direction==='withdraw'&&accountBalance().balance<amount){toast('موجودی حساب برای این برداشت کافی نیست');return}const saved=await add('balanceAdjustment',{direction,amount,category:String(d.category).trim(),date:d.date||today(),memo:String(d.memo||'').trim()});if(saved){form.reset();if(form.elements.date)form.elements.date.value=today()}})}
 
@@ -777,7 +845,29 @@ Object.assign(translations,{
  'هنوز در محدوده بودجه روزانه هستی.':'You are still within your daily limit.','هنوز سقف خرجی تعیین نکرده‌ای.':'You have not set a spending limit yet.',
  'خریداری شده':'purchased','روز متوالی':'day streak','صفحه فعلی':'Current page','تا سطح بعدی:':'To next level:'
 });
-function cloudMessage(message){const el=$('cloudStatus');if(el)el.textContent=message}
+function cloudMessage(message){
+ const el=$('cloudStatus');if(!el)return;
+ const en=(localStorage.getItem('life-lang')||'fa')==='en';
+ if(en){
+  const exact={
+   'برای استفاده از ذخیره‌سازی ابری، با ایمیل خود وارد شو.':'Sign in with your email to use cloud storage.',
+   'برای ذخیره‌سازی ابری، وارد حساب شو یا حساب جدید بساز. اطلاعات محلی تغییر نمی‌کنند.':'Sign in or create an account to use cloud storage. Your local data will remain unchanged.',
+   'کتابخانه اتصال ابری بارگذاری نشد. اینترنت و بارگذاری صفحه را بررسی کن.':'The cloud library could not be loaded. Check your connection and reload the page.',
+   'در حال ورود…':'Signing in…','در حال ساخت حساب…':'Creating your account…','در حال خروج…':'Signing out…',
+   'لطفاً صبر کن…':'Please wait…','ورود':'Sign in','ایجاد حساب':'Create account',
+   'همگام‌سازی انجام نشد: ':'Sync failed: ','ورود انجام نشد: ':'Sign-in failed: ','ثبت‌نام انجام نشد: ':'Sign-up failed: ','خروج انجام نشد: ':'Sign-out failed: ',
+   'همگام‌سازی انجام شد. ':'Sync completed. ',' رکورد روی این دستگاه موجود است.':' records are available on this device.',
+   'در حال بررسی و همگام‌سازی اطلاعات…':'Checking and syncing your data…',
+   'ورود موفق بود: ':'Signed in successfully: ','. برای انتقال داده‌ها، همگام‌سازی را دستی اجرا کن.':'. Run sync manually to transfer your data.',
+   'وارد شده‌ای: ':'Signed in as: ',' · اطلاعات هنوز فقط با فشردن دکمه همگام‌سازی منتقل می‌شوند.':' · Data transfers only when you press Sync.',
+   'درخواست ثبت‌نام ثبت شد. ایمیل تأیید را باز کن؛ پس از تأیید، برنامه باید حساب را تشخیص دهد. اگر حساب وارد نشد، از همین صفحه با همان ایمیل و رمز وارد شو.':'Your sign-up request was received. Open the confirmation email. After confirming, sign in here with the same email and password.',
+   'درخواست نصب پذیرفته شد.':'Install request accepted.','نصب انجام نشد؛ از منوی Chrome گزینه Install app را بررسی کن.':'Installation was not completed. Check Install app in the Chrome menu.'
+  };
+  let translated=exact[message];
+  if(!translated){translated=message;for(const [fa,enText] of Object.entries(exact)){if(fa.length>8&&translated.includes(fa))translated=translated.split(fa).join(enText)}}
+  el.textContent=translated;
+ }else el.textContent=message;
+}
 function cloudSettings(){return {theme:localStorage.getItem('life-theme'),lang:localStorage.getItem('life-lang'),currency:localStorage.getItem('life-currency'),accent:localStorage.getItem('life-accent'),waterTarget:localStorage.getItem('life-water-target'),accounts:localStorage.getItem('life-accounts'),mainAccount:localStorage.getItem('life-main-account'),accountSettings:localStorage.getItem('life-account-settings')}}
 function applyCloudSettings(s){if(!s)return;const map={'life-theme':s.theme,'life-lang':s.lang,'life-currency':s.currency,'life-accent':s.accent,'life-water-target':s.waterTarget,'life-accounts':s.accounts,'life-main-account':s.mainAccount,'life-account-settings':s.accountSettings};Object.entries(map).forEach(([k,v])=>{if(v!==null&&v!==undefined)localStorage.setItem(k,v)});setupSettings();if(s.lang)setLanguage(s.lang);renderAll()}
 function cloudUi(){const form=$('cloudAuthForm'),actions=$('cloudActions');if(!form||!actions)return;form.hidden=!!cloudUser;actions.hidden=!cloudUser;$('cloudEmail').disabled=!!cloudUser;$('cloudPassword').disabled=!!cloudUser;if(cloudUser)cloudMessage('وارد شده‌ای: '+cloudUser.email+' · اطلاعات هنوز فقط با فشردن دکمه همگام‌سازی منتقل می‌شوند.');else cloudMessage('برای ذخیره‌سازی ابری، وارد حساب شو یا حساب جدید بساز. اطلاعات محلی تغییر نمی‌کنند.')}
@@ -800,7 +890,7 @@ function setupCloud(){
  const email=()=>$('cloudEmail').value.trim(),password=()=>$('cloudPassword').value;
  const signIn=$('cloudSignIn'),signUp=$('cloudSignUp'),signOut=$('cloudSignOut');
  let authBusy=false;
- const setAuthBusy=busy=>{authBusy=busy;signIn.disabled=busy;signUp.disabled=busy;signIn.textContent=busy?'لطفاً صبر کن…':'ورود';signUp.textContent=busy?'لطفاً صبر کن…':'ایجاد حساب'};
+ const setAuthBusy=busy=>{authBusy=busy;signIn.disabled=busy;signUp.disabled=busy;const en=(localStorage.getItem('life-lang')||'fa')==='en';signIn.textContent=busy?(en?'Please wait…':'لطفاً صبر کن…'):(en?'Sign in':'ورود');signUp.textContent=busy?(en?'Please wait…':'لطفاً صبر کن…'):(en?'Create account':'ایجاد حساب')};
  signIn.onclick=async()=>{
   if(authBusy||!$('cloudAuthForm').reportValidity())return;
   setAuthBusy(true);cloudMessage('در حال ورود…');
