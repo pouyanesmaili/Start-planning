@@ -531,6 +531,10 @@ html[dir="ltr"] .bottom-nav{direction:ltr!important}
 }
 .settings-grid>.panel>.button-row{display:grid;grid-template-columns:1fr;gap:10px;width:100%;margin:4px 0}
 .settings-grid>.panel>#cloudAuthForm{display:grid;grid-template-columns:1fr;gap:10px;width:100%;max-width:none;margin:4px 0}
+/* Keep the native hidden state authoritative: otherwise display:grid can expose disabled auth fields. */
+#cloudPanel>#cloudAuthForm[hidden]{display:none!important}
+#cloudPanel>#cloudAuthForm:not([hidden]){display:grid!important}
+#cloudAuthForm input:disabled{opacity:.62;cursor:not-allowed}
 #cloudAuthForm .button-row{grid-column:1/-1;display:grid;grid-template-columns:1fr;gap:10px;width:100%;margin:0}
 #cloudActions{display:grid;grid-template-columns:1fr;gap:10px;width:100%;margin:8px 0}
 #cloudActions button{width:100%;min-height:44px}
