@@ -1,8 +1,8 @@
 {
   "name": "start-planning",
-  "version": "24.0.0",
+  "version": "25.0.0",
   "private": true,
-  "description": "Start Planning PWA and Android wrapper — version 24.0",
+  "description": "Start Planning PWA and Android wrapper — version 25.0",
   "scripts": {
     "copy:web": "node copy-web.js",
     "cap:sync": "npm run copy:web && cap sync",

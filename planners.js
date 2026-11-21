@@ -5,7 +5,8 @@
 // row-level security on both tables is required and is already configured for auth.uid().
 const SUPABASE_URL='https://nzwxlnidemfhvdutyuyu.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY='sb_publishable_naBfzGTBDRbcbk2xMMfREQ_IbtRCOFw';
-let cloudClient=null, cloudUser=null, cloudBusy=false;
+let cloudClient=null, cloudUser=null, cloudBusy=false, cloudSyncTimer=null, cloudSyncingAgain=false, cloudApplyingRemote=false;
+const SYNC_QUEUE_KEY='life-cloud-tombstones-v1', SYNC_SNAPSHOT_KEY='life-cloud-snapshot-v1';
 const DB_NAME='life-os-db', DB_VERSION=1, STORE='records';
 let db=null, records=[], chartRefs={}, currentMonth=new Date(), timer=null, timerSeconds=1500, timerRunning=false, timerIsBreak=false, deferredInstall=null;
 const $=id=>document.getElementById(id), localDateKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`, today=()=>localDateKey(new Date());
@@ -28,14 +29,15 @@ function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2
 function uiText(value){let text=String(value??'');if((localStorage.getItem('life-lang')||'fa')!=='en'||typeof translations==='undefined')return text;for(const key of Object.keys(translations).sort((a,b)=>b.length-a.length)){if(key.length>=4&&text.includes(key))text=text.split(key).join(translations[key])}return translations[text]||text}
 function toast(msg){const el=$('toast');el.textContent=uiText(msg);el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2400)}
 function openDB(){return new Promise((resolve,reject)=>{if(!('indexedDB'in window)){resolve(null);return}const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains(STORE))d.createObjectStore(STORE,{keyPath:'id'})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
-async function load(){try{db=await openDB();if(db){records=await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly'),q=tx.objectStore(STORE).getAll();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>rej(q.error)});$('storageStatus').textContent='ذخیره‌سازی IndexedDB فعال'}else throw Error('no indexeddb')}catch(e){records=JSON.parse(localStorage.getItem('life-records')||'[]');$('storageStatus').textContent='ذخیره‌سازی محلی فعال'}}
-async function persist(){
+async function load(){try{db=await openDB();if(db){records=await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly'),q=tx.objectStore(STORE).getAll();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>rej(q.error)});$('storageStatus').textContent='ذخیره‌سازی IndexedDB فعال'}else throw Error('no indexeddb')}catch(e){records=JSON.parse(localStorage.getItem('life-records')||'[]');$('storageStatus').textContent='ذخیره‌سازی محلی فعال'}if(!localStorage.getItem(SYNC_SNAPSHOT_KEY))localStorage.setItem(SYNC_SNAPSHOT_KEY,JSON.stringify(Object.fromEntries(records.map(r=>[String(r.id),r]))))}
+function readTombstones(){try{return JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY)||'{}')}catch{return {}}}
+function queueCloudSync(){if(cloudApplyingRemote||!cloudUser)return;clearTimeout(cloudSyncTimer);cloudMessage('تغییرات ذخیره شد؛ همگام‌سازی خودکار در صف است.');cloudSyncTimer=setTimeout(()=>cloudSyncNow(),1100)}
+async function persist(options={}){
  const payload=JSON.stringify(records);
- if(db){
-  try{await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();records.forEach(r=>tx.objectStore(STORE).put(r));tx.oncomplete=res;tx.onerror=()=>rej(tx.error||new Error('IndexedDB write failed'));tx.onabort=()=>rej(tx.error||new Error('IndexedDB transaction aborted'))});return}
-  catch(error){console.warn('IndexedDB unavailable; switching to local storage.',error);db=null}
- }
- try{localStorage.setItem('life-records',payload)}catch(error){throw new Error('فضای ذخیره‌سازی دستگاه کافی نیست. از بخش تنظیمات پشتیبان بگیر و کمی فضا خالی کن.')}
+ if(!options.remote&&!cloudApplyingRemote){let snapshot={};try{snapshot=JSON.parse(localStorage.getItem(SYNC_SNAPSHOT_KEY)||'{}')}catch{}const current=Object.fromEntries(records.map(r=>[String(r.id),r]));const tombstones=readTombstones();const now=new Date().toISOString();for(const [id,r] of Object.entries(current)){const before=snapshot[id];if(!before||JSON.stringify({...before,updatedAt:undefined})!==JSON.stringify({...r,updatedAt:undefined})){if(!r.updatedAt||r.updatedAt===before?.updatedAt)r.updatedAt=now}}for(const id of Object.keys(snapshot)){if(!current[id])tombstones[id]={targetId:id,updatedAt:now}}localStorage.setItem(SYNC_QUEUE_KEY,JSON.stringify(tombstones));localStorage.setItem(SYNC_SNAPSHOT_KEY,JSON.stringify(Object.fromEntries(records.map(r=>[String(r.id),r]))))}
+ if(db){try{await new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();records.forEach(r=>tx.objectStore(STORE).put(r));tx.oncomplete=res;tx.onerror=()=>rej(tx.error||new Error('IndexedDB write failed'));tx.onabort=()=>rej(tx.error||new Error('IndexedDB transaction aborted'))})}catch(error){console.warn('IndexedDB unavailable; switching to local storage.',error);db=null}}
+ if(!db){try{localStorage.setItem('life-records',payload)}catch(error){throw new Error('فضای ذخیره‌سازی دستگاه کافی نیست. از بخش تنظیمات پشتیبان بگیر و کمی فضا خالی کن.')}}
+ if(!options.remote)queueCloudSync();
 }
 async function add(type,data){const record={id:uid(),type,createdAt:new Date().toISOString(),...data};records.unshift(record);try{await persist()}catch(error){records=records.filter(item=>item.id!==record.id);toast(error.message||'ذخیره اطلاعات انجام نشد');return false}try{renderAll()}catch(error){console.error('Render after save failed:',error)}toast('اطلاعات ذخیره شد');return true}
 async function update(id,patch){const r=records.find(x=>x.id===id);if(r){Object.assign(r,patch);await persist();renderAll()}}
@@ -613,7 +615,7 @@ Object.assign(translations,{
  'پشتیبان‌گیری و بازیابی':'Backup and restore','از تمام داده‌ها یک فایل JSON تهیه کن یا نسخه پشتیبان را بازیابی کن.':'Export all your data as a JSON file or restore a backup.',
  '↓ دریافت پشتیبان JSON':'↓ Download JSON backup','↑ بازیابی JSON':'↑ Restore JSON','پاک‌کردن همه اطلاعات':'Delete all data',
  'نصب و وضعیت برنامه':'App installation and status','بررسی وضعیت نصب...':'Checking installation status...','نصب اپلیکیشن':'Install app',
- 'نسخه 23.4 · اصلاح ورود ابری · اطلاعات روی همین دستگاه ذخیره می‌شوند.':'Version 24.0 · Cloud account and sync improvements · Data is stored on this device.',
+ 'نسخه 23.4 · اصلاح ورود ابری · اطلاعات روی همین دستگاه ذخیره می‌شوند.':'Version 25.0 · Automatic cloud sync and change management.',
  'نصب روی گوشی یا کامپیوتر':'Install on a phone or computer',
  'اندروید و کامپیوتر: از منوی مرورگر گزینه Install app یا نصب برنامه را انتخاب کن.':'Android and desktop: open the browser menu and choose Install app.',
  'آیفون و آیپد: در Safari دکمه Share را بزن و Add to Home Screen را انتخاب کن.':'iPhone and iPad: in Safari, tap Share, then choose Add to Home Screen.',
@@ -632,8 +634,11 @@ Object.assign(translations,{
  'در حال ورود…':'Signing in…','در حال ساخت حساب…':'Creating your account…','در حال خروج…':'Signing out…','لطفاً صبر کن…':'Please wait…',
  'همگام‌سازی انجام شد. ':'Sync completed. ',' رکورد روی این دستگاه موجود است.':' records are available on this device.',
  'همگام‌سازی انجام نشد: ':'Sync failed: ','ورود انجام نشد: ':'Sign-in failed: ','ثبت‌نام انجام نشد: ':'Sign-up failed: ','خروج انجام نشد: ':'Sign-out failed: ',
- 'ورود موفق بود: ':'Signed in successfully: ','. برای انتقال داده‌ها، همگام‌سازی را دستی اجرا کن.':'. Run sync manually to transfer your data.',
- 'وارد شده‌ای: ':'Signed in as: ',' · اطلاعات هنوز فقط با فشردن دکمه همگام‌سازی منتقل می‌شوند.':' · Data transfers only when you press Sync.',
+ 'ورود موفق بود: ':'Signed in successfully: ','. همگام‌سازی خودکار فعال شد.':'. Run sync manually to transfer your data.',
+ 'وارد شده‌ای: ':'Signed in as: ',' · همگام‌سازی خودکار فعال است.':' · Automatic sync is enabled.',
+   'تغییرات ذخیره شد؛ همگام‌سازی خودکار در صف است.':'Changes saved; automatic sync is queued.',
+   'همگام‌سازی خودکار با موفقیت انجام شد. ':'Automatic sync completed. ',
+   'همگام‌سازی انجام نشد؛ تغییرات روی دستگاه در صف می‌مانند: ':'Sync failed; changes remain queued on this device: ',
  'درخواست ثبت‌نام ثبت شد. ایمیل تأیید را باز کن؛ پس از تأیید، برنامه باید حساب را تشخیص دهد. اگر حساب وارد نشد، از همین صفحه با همان ایمیل و رمز وارد شو.':'Your sign-up request was received. Open the confirmation email. After confirming, sign in here with the same email and password.'
 });
 const originalTextNodes=new Map();
@@ -858,8 +863,11 @@ function cloudMessage(message){
    'همگام‌سازی انجام نشد: ':'Sync failed: ','ورود انجام نشد: ':'Sign-in failed: ','ثبت‌نام انجام نشد: ':'Sign-up failed: ','خروج انجام نشد: ':'Sign-out failed: ',
    'همگام‌سازی انجام شد. ':'Sync completed. ',' رکورد روی این دستگاه موجود است.':' records are available on this device.',
    'در حال بررسی و همگام‌سازی اطلاعات…':'Checking and syncing your data…',
-   'ورود موفق بود: ':'Signed in successfully: ','. برای انتقال داده‌ها، همگام‌سازی را دستی اجرا کن.':'. Run sync manually to transfer your data.',
-   'وارد شده‌ای: ':'Signed in as: ',' · اطلاعات هنوز فقط با فشردن دکمه همگام‌سازی منتقل می‌شوند.':' · Data transfers only when you press Sync.',
+   'ورود موفق بود: ':'Signed in successfully: ','. همگام‌سازی خودکار فعال شد.':'. Run sync manually to transfer your data.',
+   'وارد شده‌ای: ':'Signed in as: ',' · همگام‌سازی خودکار فعال است.':' · Automatic sync is enabled.',
+   'تغییرات ذخیره شد؛ همگام‌سازی خودکار در صف است.':'Changes saved; automatic sync is queued.',
+   'همگام‌سازی خودکار با موفقیت انجام شد. ':'Automatic sync completed. ',
+   'همگام‌سازی انجام نشد؛ تغییرات روی دستگاه در صف می‌مانند: ':'Sync failed; changes remain queued on this device: ',
    'درخواست ثبت‌نام ثبت شد. ایمیل تأیید را باز کن؛ پس از تأیید، برنامه باید حساب را تشخیص دهد. اگر حساب وارد نشد، از همین صفحه با همان ایمیل و رمز وارد شو.':'Your sign-up request was received. Open the confirmation email. After confirming, sign in here with the same email and password.',
    'درخواست نصب پذیرفته شد.':'Install request accepted.','نصب انجام نشد؛ از منوی Chrome گزینه Install app را بررسی کن.':'Installation was not completed. Check Install app in the Chrome menu.'
   };
@@ -870,18 +878,21 @@ function cloudMessage(message){
 }
 function cloudSettings(){return {theme:localStorage.getItem('life-theme'),lang:localStorage.getItem('life-lang'),currency:localStorage.getItem('life-currency'),accent:localStorage.getItem('life-accent'),waterTarget:localStorage.getItem('life-water-target'),accounts:localStorage.getItem('life-accounts'),mainAccount:localStorage.getItem('life-main-account'),accountSettings:localStorage.getItem('life-account-settings')}}
 function applyCloudSettings(s){if(!s)return;const map={'life-theme':s.theme,'life-lang':s.lang,'life-currency':s.currency,'life-accent':s.accent,'life-water-target':s.waterTarget,'life-accounts':s.accounts,'life-main-account':s.mainAccount,'life-account-settings':s.accountSettings};Object.entries(map).forEach(([k,v])=>{if(v!==null&&v!==undefined)localStorage.setItem(k,v)});setupSettings();if(s.lang)setLanguage(s.lang);renderAll()}
-function cloudUi(){const form=$('cloudAuthForm'),actions=$('cloudActions');if(!form||!actions)return;form.hidden=!!cloudUser;actions.hidden=!cloudUser;$('cloudEmail').disabled=!!cloudUser;$('cloudPassword').disabled=!!cloudUser;if(cloudUser)cloudMessage('وارد شده‌ای: '+cloudUser.email+' · اطلاعات هنوز فقط با فشردن دکمه همگام‌سازی منتقل می‌شوند.');else cloudMessage('برای ذخیره‌سازی ابری، وارد حساب شو یا حساب جدید بساز. اطلاعات محلی تغییر نمی‌کنند.')}
-async function cloudSyncNow(){if(!cloudClient||!cloudUser||cloudBusy)return;cloudBusy=true;$('cloudSync').disabled=true;cloudMessage('در حال بررسی و همگام‌سازی اطلاعات…');try{
- const uid=cloudUser.id;
- const {data:remoteRows,error:readError}=await cloudClient.from('user_records').select('record_id,record_type,data,updated_at').eq('user_id',uid);if(readError)throw readError;
- const localById=new Map(records.map(r=>[String(r.id),r]));
- for(const row of (remoteRows||[])){const remote={...(row.data||{}),id:String(row.record_id),type:row.record_type,updatedAt:row.updated_at||row.data?.updatedAt||row.data?.createdAt||''};const local=localById.get(remote.id);if(!local)localById.set(remote.id,remote);else{const lt=Date.parse(local.updatedAt||local.createdAt||0)||0,rt=Date.parse(remote.updatedAt||remote.createdAt||0)||0;if(rt>lt)localById.set(remote.id,remote)}}
- records=Array.from(localById.values());await persist();
- if(records.length){const payload=records.map(r=>({user_id:uid,record_id:String(r.id),record_type:String(r.type||'record'),data:r,updated_at:r.updatedAt||r.createdAt||new Date().toISOString()}));const {error}=await cloudClient.from('user_records').upsert(payload,{onConflict:'user_id,record_id'});if(error)throw error}
- const {data:settingsRow,error:settingsReadError}=await cloudClient.from('user_settings').select('settings').eq('user_id',uid).maybeSingle();if(settingsReadError)throw settingsReadError;
- const localSettings=cloudSettings();if(!settingsRow){const {error}=await cloudClient.from('user_settings').upsert({user_id:uid,settings:localSettings,updated_at:new Date().toISOString()},{onConflict:'user_id'});if(error)throw error}else{applyCloudSettings(settingsRow.settings);const {error}=await cloudClient.from('user_settings').upsert({user_id:uid,settings:cloudSettings(),updated_at:new Date().toISOString()},{onConflict:'user_id'});if(error)throw error}
- renderAll();cloudMessage('همگام‌سازی انجام شد. '+records.length+' رکورد روی این دستگاه موجود است.');
- }catch(error){console.error('Cloud sync failed',error);cloudMessage('همگام‌سازی انجام نشد: '+(error.message||'خطای ارتباط یا دسترسی جداول'))}finally{cloudBusy=false;$('cloudSync').disabled=false}}
+function cloudUi(){const form=$('cloudAuthForm'),actions=$('cloudActions');if(!form||!actions)return;form.hidden=!!cloudUser;actions.hidden=!cloudUser;$('cloudEmail').disabled=!!cloudUser;$('cloudPassword').disabled=!!cloudUser;if(cloudUser)cloudMessage('وارد شده‌ای: '+cloudUser.email+' · همگام‌سازی خودکار فعال است.');else cloudMessage('برای ذخیره‌سازی ابری، وارد حساب شو یا حساب جدید بساز. اطلاعات محلی تغییر نمی‌کنند.')}
+async function cloudSyncNow(){if(!cloudClient||!cloudUser)return;if(cloudBusy){cloudSyncingAgain=true;return}cloudBusy=true;$('cloudSync').disabled=true;cloudMessage('در حال بررسی و همگام‌سازی اطلاعات…');try{
+ const userId=cloudUser.id;
+ const {data:remoteRows,error:readError}=await cloudClient.from('user_records').select('record_id,record_type,data,updated_at').eq('user_id',userId);if(readError)throw readError;
+ const remoteRecords=new Map(),remoteDeletes=new Map();for(const row of(remoteRows||[])){if(row.record_type==='__tombstone__'){const target=row.data?.targetId;if(target)remoteDeletes.set(String(target),row.data?.updatedAt||row.updated_at||'')}else{const item={...(row.data||{}),id:String(row.record_id),type:row.record_type,updatedAt:row.updated_at||row.data?.updatedAt||row.data?.createdAt||''};remoteRecords.set(item.id,item)}}
+ const tombstones=readTombstones();const localById=new Map(records.map(r=>[String(r.id),r]));
+ for(const [id,deletedAt] of remoteDeletes){const local=localById.get(id);if(!local||(Date.parse(deletedAt)||0)>=(Date.parse(local.updatedAt||local.createdAt||0)||0))localById.delete(id)}
+ for(const [id,remote] of remoteRecords){const deletedAt=tombstones[id]?.updatedAt||remoteDeletes.get(id);if(deletedAt&&(Date.parse(deletedAt)||0)>=(Date.parse(remote.updatedAt||remote.createdAt||0)||0))continue;const local=localById.get(id);if(!local)localById.set(id,remote);else{const lt=Date.parse(local.updatedAt||local.createdAt||0)||0,rt=Date.parse(remote.updatedAt||remote.createdAt||0)||0;if(rt>lt)localById.set(id,remote)}}
+ records=Array.from(localById.values());cloudApplyingRemote=true;await persist({remote:true});cloudApplyingRemote=false;
+ const payload=records.map(r=>({user_id:userId,record_id:String(r.id),record_type:String(r.type||'record'),data:r,updated_at:r.updatedAt||r.createdAt||new Date().toISOString()}));for(const [id,t] of Object.entries(tombstones))payload.push({user_id:userId,record_id:'__deleted__:'+id,record_type:'__tombstone__',data:t,updated_at:t.updatedAt});
+ if(payload.length){const {error}=await cloudClient.from('user_records').upsert(payload,{onConflict:'user_id,record_id'});if(error)throw error}
+ const {data:settingsRow,error:settingsReadError}=await cloudClient.from('user_settings').select('settings').eq('user_id',userId).maybeSingle();if(settingsReadError)throw settingsReadError;const localSettings=cloudSettings();if(!settingsRow){const {error}=await cloudClient.from('user_settings').upsert({user_id:userId,settings:localSettings,updated_at:new Date().toISOString()},{onConflict:'user_id'});if(error)throw error}else{applyCloudSettings(settingsRow.settings);const {error}=await cloudClient.from('user_settings').upsert({user_id:userId,settings:cloudSettings(),updated_at:new Date().toISOString()},{onConflict:'user_id'});if(error)throw error}
+ localStorage.setItem(SYNC_SNAPSHOT_KEY,JSON.stringify(Object.fromEntries(records.map(r=>[String(r.id),r]))));localStorage.setItem(SYNC_QUEUE_KEY,JSON.stringify({}));renderAll();cloudMessage('همگام‌سازی خودکار با موفقیت انجام شد. '+records.length+' رکورد روی این دستگاه موجود است.');
+ }catch(error){cloudApplyingRemote=false;console.error('Cloud sync failed',error);cloudMessage('همگام‌سازی انجام نشد؛ تغییرات روی دستگاه در صف می‌مانند: '+(error.message||'خطای ارتباط یا دسترسی جداول'))}finally{cloudBusy=false;$('cloudSync').disabled=false;if(cloudSyncingAgain){cloudSyncingAgain=false;queueCloudSync()}}}
+
 function setupCloud(){
  if(!window.supabase?.createClient){cloudMessage('کتابخانه اتصال ابری بارگذاری نشد. اینترنت و بارگذاری صفحه را بررسی کن.');return}
  try{
@@ -915,11 +926,12 @@ function setupCloud(){
  cloudClient.auth.onAuthStateChange((event,session)=>{
   if(['INITIAL_SESSION','SIGNED_IN','SIGNED_OUT','TOKEN_REFRESHED','USER_UPDATED'].includes(event)){
    cloudUser=session?.user||null;cloudUi();
-   if(event==='SIGNED_IN')cloudMessage('ورود موفق بود: '+(cloudUser?.email||'حساب کاربری')+'. برای انتقال داده‌ها، همگام‌سازی را دستی اجرا کن.');
+   if(event==='SIGNED_IN'||event==='INITIAL_SESSION'){if(cloudUser)queueCloudSync();if(event==='SIGNED_IN')cloudMessage('ورود موفق بود: '+(cloudUser?.email||'حساب کاربری')+'. همگام‌سازی خودکار فعال شد.')}
   }
  });
  cloudUi();
 }
+window.addEventListener('online',()=>{if(cloudUser)queueCloudSync()});document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&cloudUser)queueCloudSync()});
 async function init(){await load();startLanguageObserver();clock();setInterval(clock,1000);setupOnboarding();bindAll();setupCalendar();setupTimer();setupSearch();setupSettings();setupBackup();setupCloud();setupPWA();setupEventReminders();if(localStorage.getItem('life-lang'))setLanguage(localStorage.getItem('life-lang'));renderAll();document.querySelectorAll('form [name=date]').forEach(i=>{if(!i.value)i.value=today()})}
 document.addEventListener('DOMContentLoaded',init);
 })();

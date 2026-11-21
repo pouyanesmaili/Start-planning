@@ -1,4 +1,4 @@
-const CACHE_NAME='start-planning-v24.0-stable';
+const CACHE_NAME='start-planning-v25.0-auto-sync';
 const BASE_URL=new URL(self.registration.scope);
 const CORE_FILES=['','index.html','planeers.css','planners.js','manifest.json','icon.svg','icon-192.png','icon-512.png','apple-touch-icon.png'].map(path=>new URL(path,BASE_URL).href);
 const CHART_URL_PREFIX='https://cdn.jsdelivr.net/npm/chart.js';
